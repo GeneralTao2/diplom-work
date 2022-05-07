@@ -1,0 +1,20 @@
+from multiprocessing import Pool
+import os
+from multiprocessing import Process
+
+def info(title):
+    print()
+    print('midule name:', __name__)
+    print('parent process:', os.getppid())
+    print('parent id:', os.getpid())
+
+
+def f(name):
+    info("Function f")
+    print('Hello ', name)
+
+if __name__ == '__main__':
+    info("Main line")
+    p = Process(target=f, args=('bob',))
+    p.start()
+    p.join()

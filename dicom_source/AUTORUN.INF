@@ -1,0 +1,3 @@
+[autorun]
+ICON=autorun.exe,0
+OPEN=autorun.exe index.htm

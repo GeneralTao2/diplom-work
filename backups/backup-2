@@ -1,0 +1,337 @@
+import numpy as np
+import cv2
+import pyvista as pv
+import vtk
+import shapely as sh
+from shapely.geometry import Polygon
+import matplotlib.pyplot as plt
+
+vrtx_qty = 343
+
+image_path = 'C:\\Users\\gener\\OneDrive\\Documents\\Python\\images-to-stl\\pa0st0st1-tragets\\'
+cnt_array = []
+approx_array = []
+range_x1 = 0
+range_x2 = 10
+start_img = 21
+image_ids = range(range_x1 + start_img, range_x2 + start_img)
+for im in image_ids:
+    image = cv2.imread(image_path + 'IM' + str(im) + '.png')
+    b,g,r = cv2.split(image)
+
+    lower_green = np.array([0,100,0])
+    upper_green = np.array([50,255,50])
+
+    mask = cv2.inRange(image,lower_green,upper_green)
+    mask_rgb = cv2.cvtColor(mask,cv2.COLOR_GRAY2BGR)
+    image = image & mask_rgb
+    
+    imgGray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    _, thresh = cv2.threshold(imgGray, 100, 255, cv2.THRESH_BINARY)
+    """ cv2.imshow('shapes', thresh)
+    cv2.waitKey(0) """
+    contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+    cnt = contours[0]
+    approx = cv2.approxPolyDP(cnt, 0.000001*cv2.arcLength(cnt, True), True)
+    cnt_array.append(cnt)
+    approx_array.append(approx)
+""" cv2.destroyAllWindows()
+exit() """
+def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
+    return abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
+
+def toStructoredArray(polygon):
+    retval = []
+    for v in polygon:
+        retval.append([v[0][0]-340, v[0][1]-300])
+    return retval
+
+def plotPolygon(polygon, style):
+    x = []
+    y = []
+    for v in polygon:
+        x.append(v[0])
+        y.append(v[1])
+    plt.plot(x, y, style)
+
+def smoothPolygon(poly):
+    length = len(poly)
+    smoothed_raw = []
+    for i in range(length-1):
+        dx = poly[i][0] - poly[i+1][0]
+        dy = poly[i][1] - poly[i+1][1]
+        newx = poly[i][0] - dx/2
+        newy = poly[i][1] - dy/2
+        smoothed_raw.append([newx, newy])
+    dx = poly[length-1][0] - poly[0][0]
+    dy = poly[length-1][1] - poly[0][1]
+    newx = poly[length-1][0] - dx/2
+    newy = poly[length-1][1] - dy/2
+    smoothed_raw.append([newx, newy])
+    return smoothed_raw
+
+def averageEdgeLength(poly):
+    length = len(poly)
+    total = 0
+    for i in range(length-1):
+        dx = poly[i][0] - poly[i+1][0]
+        dy = poly[i][1] - poly[i+1][1]
+        total += np.sqrt(dx*dx + dy*dy)
+    dx = poly[length-1][0] - poly[0][0]
+    dy = poly[length-1][1] - poly[0][1]
+    total += np.sqrt(dx*dx + dy*dy)
+    return total / length
+
+def minimalEdgeLength(poly):
+    length = len(poly)
+    min_length = float('inf')
+    for i in range(length-1):
+        dx = poly[i][0] - poly[i+1][0]
+        dy = poly[i][1] - poly[i+1][1]
+        length = np.sqrt(dx*dx + dy*dy)
+        if length < min_length:
+            min_length = length
+    """ dx = poly[length-1][0] - poly[0][0]
+    dy = poly[length-1][1] - poly[0][1]
+    length = np.sqrt(dx*dx + dy*dy)
+    if length < min_length:
+        min_length = length """
+    return min_length
+
+def maximumEdgeLength(poly):
+    length = len(poly)
+    max_length = 0
+    ret_index = 0
+    for i in range(length-1):
+        dx = poly[i][0] - poly[i+1][0]
+        dy = poly[i][1] - poly[i+1][1]
+        length = np.sqrt(dx*dx + dy*dy)
+        if length > max_length:
+            max_length = length
+            ret_index = i
+    return (max_length, ret_index)
+
+
+
+# add vertices to polygon while maximum edge length is less than average edge length
+def addVerticesUntilAvg(poly):
+    length = len(poly)
+    avg = averageEdgeLength(poly)
+    max_length, ret_index = maximumEdgeLength(poly)
+    while max_length > avg:
+        dx = poly[ret_index][0] - poly[ret_index+1][0]
+        dy = poly[ret_index][1] - poly[ret_index+1][1]
+        newx = poly[ret_index][0] - dx/2
+        newy = poly[ret_index][1] - dy/2
+        poly.insert(ret_index+1, [newx, newy])
+        max_length, ret_index = maximumEdgeLength(poly)
+    return poly
+
+def addVerticesUntilNumber(poly, number):
+    length = len(poly)
+    while length < number:
+        _, ret_index = maximumEdgeLength(poly)
+        dx = poly[ret_index][0] - poly[ret_index+1][0]
+        dy = poly[ret_index][1] - poly[ret_index+1][1]
+        newx = poly[ret_index][0] - dx/2
+        newy = poly[ret_index][1] - dy/2
+        poly.insert(ret_index+1, [newx, newy])
+        length += 1
+    return poly
+
+def listToArray(poly):
+    length = len(poly)
+    retval = []
+    for i in range(length):
+        retval.append([poly[i][0], poly[i][1]])
+    return retval
+
+#for a in range(len(approx_array)):
+bufferd_poly_array = []
+raw_mlop = 0 # maximum length of polygon
+mlop = 0
+idx_of_mlop = 0
+image_qnt = len(image_ids)
+for a in range(image_qnt):
+    raw = cnt_array[a]
+    #exit()
+
+    length = len(raw)
+    structured_raw = toStructoredArray(raw)
+    structured_approx = toStructoredArray(approx_array[a])
+
+    smoothed_raw = []
+    dx=0
+    dy=0
+    newx=0
+    new=0
+
+
+    smoothed_raw = smoothPolygon(structured_raw)
+    smoothed_approx = smoothPolygon(structured_approx)
+    structured_approx.append(structured_approx[0])
+    polygon_obj = Polygon(smoothed_approx).buffer(30, resolution=13, join_style=1).buffer(-30, resolution=13, join_style=1)
+    buffered_approx_list = list(polygon_obj.exterior.coords)
+    buffered_approx_array = listToArray(buffered_approx_list)
+    buffered_array_length = len(buffered_approx_array)
+    
+    if(buffered_array_length > raw_mlop):
+        raw_mlop = buffered_array_length
+        idx_of_mlop = a
+    bufferd_poly_array.append(buffered_approx_array)
+
+filled_approx_array = addVerticesUntilAvg(bufferd_poly_array[idx_of_mlop])  
+mlop = len(filled_approx_array)
+#print(mlop)
+#print(idx_of_mlop)
+
+filled_poly_array = []
+for a in range(image_qnt):
+    if(a == idx_of_mlop):
+        filled_poly_array.append(filled_approx_array)
+    else:
+        filled_poly_array.append(addVerticesUntilNumber(bufferd_poly_array[a], mlop))
+    #print(maximumEdgeLength(buffered_approx_array))
+    #filled_approx_array = addVertices(buffered_approx_array)
+    #print(buffered_approx[0], buffered_approx[-2])
+    #exit()
+    #plotPolygon(structured_raw, 'r')
+    #print(len(filled_approx_array))
+    #plotPolygon(filled_approx_array, 'r')
+    #plotPolygon(filled_approx_array, 'ro')
+    #plt.plot()
+    #plotPolygon(smoothed_raw, 'g')
+    #plotPolygon(structured_approx, 'b')
+    #plotPolygon(structured_approx, 'bo')
+    #plotPolygon(smoothed_approx, 'bo')
+    #print(buffered_approx_array[a])
+    #plotPolygon([bufferd_poly_array[a][0]], 'ro')
+
+""" for a in range(image_qnt):
+    plotPolygon(filled_poly_array[a], 'bo')
+    plotPolygon(filled_poly_array[a], 'b')
+    print(len(filled_poly_array[a]))
+
+
+plt.axis([-160, 110,-160, 110])
+plt.show()  """
+#print(mlop)
+#exit()
+
+
+for a in range(image_qnt):
+    del filled_poly_array[a][-1]
+mlop-=1
+
+offsets = np.zeros((image_qnt, 1), int)
+
+
+
+
+
+
+#surf = pv.PolyData(vertices, faces)
+#print([[1, 2],[3, 4],[5, 6]])
+#print(filled_poly_array[0])
+#exit()
+
+
+def map(i, offset):
+    ret_val = i + offset
+    if(ret_val >= mlop):
+        ret_val = ret_val - mlop
+    if(ret_val < 0):
+        ret_val = ret_val + mlop
+    return ret_val
+#print(mlop)
+def create_mesh(offsets):  
+    global mlop  
+    vertices2d = structured_raw
+    vertices = np.zeros((mlop*image_qnt, 3), np.double)
+    mlop+=1
+    faces_hstack = np.zeros(((mlop)*(image_qnt-1)-1, 5), np.int32)
+    for j in range(image_qnt-1):
+        for i in range(mlop-1):
+        #print(offsets[0])
+            m_i_h = map(i, offsets[j])
+            m_i_l = i
+            if(i==mlop-1-offsets[j]) and offsets[j] > 0:
+                faces_hstack[i+(j*(mlop))] = [4, 0+j*mlop, m_i_h+j*mlop, m_i_l+(j+1)*mlop, m_i_l+1+(j+1)*mlop]
+            elif(i==abs(offsets[j])-1) and offsets[j] < 0:
+                faces_hstack[i+(j*(mlop))] = [4, 1+j*mlop, m_i_h+j*mlop, m_i_l+(j+1)*mlop, m_i_l+1+(j+1)*mlop]
+            else:
+                faces_hstack[i+(j*(mlop))] = [4, m_i_h+1+j*mlop, m_i_h+j*mlop, m_i_l+(j+1)*mlop, m_i_l+1+(j+1)*mlop]
+        #m_i_h = map(mlop-1, offsets[j])
+        #faces_hstack[mlop-1+(j*(mlop))] = [4, m_i_h+1+j*mlop, m_i_h+j*mlop, mlop-1+(j+1)*mlop, 0+(j+1)*mlop]
+    
+    mlop-=1    
+    for j in range(image_qnt):
+        for i in range(mlop):
+            vertices[i+(j*mlop)] = [filled_poly_array[j][i][0], filled_poly_array[j][i][1], j*20]
+    #print(faces_hstack[-2])
+    faces = np.hstack(faces_hstack)
+    mesh = pv.PolyData(vertices, faces)
+    return mesh
+
+class MyCustomRoutine():
+    def __init__(self, mesh):
+        self.output = mesh # Expected PyVista mesh type
+        # default parameters
+        self.offsets = np.zeros((image_qnt, 1), int)
+
+    def __call__(self, param, value):
+        self.offsets[param] = value
+        self.update()
+
+    def update(self):
+        # This is where you call your simulation
+        result = create_mesh(self.offsets)
+        self.output.overwrite(result)
+        return
+
+starting_mesh = create_mesh(offsets)
+engine = MyCustomRoutine(starting_mesh)
+p = pv.Plotter()
+p.add_mesh(starting_mesh, show_edges=True)
+
+
+
+""" p.add_slider_widget(
+    callback=lambda value: engine(0, int(value)),
+    rng=[-100, 100],
+    value=0,
+    title="2",
+    pointa=(.025, .1), pointb=(.31, .1),
+    style='modern',
+) """
+""" p.add_slider_widget(
+    callback=lambda value: engine(2, int(value)),
+    rng=[-100, 100],
+    value=0,
+    title="2",
+    pointa=(.35, .1), pointb=(.64, .1),
+    style='modern',
+) """
+
+
+
+for j in range(10):
+    k = int(j)
+    h = j/image_qnt+0.05
+    p.add_slider_widget(
+        callback=lambda value, k=k: engine(k, int(value)),
+        rng=[-100, 100],
+        value=0,
+        title=str(j),
+        pointa=(.8, h), pointb=(1.005, h),
+        style='modern',
+    )
+
+p.show()
+    
+# plot each face with a different color
+#surf.save("C:\\Users\gener\OneDrive\Documents\Python\images-to-stl\OMG.vtp", True)
+#surf.save("C:\\Users\gener\OneDrive\Documents\Python\images-to-stl\OMG.ply", True)
+#surf.save("C:\\Users\gener\OneDrive\Documents\Python\images-to-stl\OMG.vtk", True)
+#surf.plot()
